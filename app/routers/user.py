@@ -1,38 +1,78 @@
 # System imports
 
-
 # Libs imports
+import pymysql
 from fastapi import APIRouter, status, Response, HTTPException
-from fastapi.encoders import jsonable_encoder
 
 # Local imports
-from internal.models import User, right
+from internal.models import User
 
 router = APIRouter()
 
-users = [
-    {"id": 1, "name": "John Doe", "email": "johndoe@test.com",
-        "right": right.MAINTAINER},
-]
+connection = pymysql.connect(host='host.docker.internal',
+                             user='root',
+                             password='',
+                             database='back-python',
+                             cursorclass=pymysql.cursors.DictCursor)
+cursor = connection.cursor(pymysql.cursors.DictCursor)
 
 
-@ router.get("/users")
-async def get_all_users() -> list[User]:
-    if len(users) == 0:
+# READ
+@router.get("/users")
+async def read_users():
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM user")
+        result = cursor.fetchall()
+        return result
+
+
+@router.get("/users/{user_id}")
+async def read_user(user_id: int):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM user WHERE id=%s", (user_id,))
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {"id": result["id"], "name": result["name"], "email": result["email"], "rights": result["rights"], "id_company": result["id_company"]}
+
+
+# CREATE
+@router.post("/users")
+async def create_user(user: User):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM user WHERE name=%s", (user.name,))
+        result = cursor.fetchone()
+        if result:
+            raise HTTPException(
+                status_code=409, detail="User already exists")
+        cursor.execute("INSERT INTO user (name, email, rights, id_company) VALUES (%s, %s, %s, %s)",
+                       (user.name, user.email, user.rights, user.id_company))
+        connection.commit()
+        return {"id": cursor.lastrowid, "name": user.name, "email": user.email, "rights": user.rights, "id_company": user.id_company}
+
+
+# UPDATE
+@router.put("/users/{user_id}")
+async def update_user(user_id: int, user: User):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM user WHERE id=%s", (user_id,))
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        cursor.execute("UPDATE user SET name=%s, email=%s, rights=%s, id_company=%s WHERE id=%s",
+                       (user.name, user.email, user.rights, user.id_company, user_id))
+        connection.commit()
+        return {"id": user_id, "name": user.name, "email": user.email, "rights": user.rights, "id_company": user.id_company}
+
+
+# DELETE
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: int):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM user WHERE id=%s", (user_id,))
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        cursor.execute("DELETE FROM user WHERE id=%s", (user_id,))
+        connection.commit()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    return users
-
-
-@ router.get("/user/{user_id}")
-async def get_user_by_id(user_id: int) -> User:
-    for user in users:
-        if user["id"] == user_id:
-            return user
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                        detail="User not found")
-
-
-@ router.post("/users")
-async def create_user(user: User) -> User:
-    users.append(user)
-    return user

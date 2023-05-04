@@ -1,38 +1,79 @@
 # System imports
 
-
 # Libs imports
+import pymysql
 from fastapi import APIRouter, status, Response, HTTPException
-from fastapi.encoders import jsonable_encoder
 
 # Local imports
 from internal.models import Planning
-from routers.company import companies
 
 router = APIRouter()
 
-planning = [
-    {"id": 1, "name": "Planning 1", "company": companies}
-]
+connection = pymysql.connect(host='host.docker.internal',
+                             user='root',
+                             password='',
+                             database='back-python',
+                             cursorclass=pymysql.cursors.DictCursor)
+cursor = connection.cursor(pymysql.cursors.DictCursor)
 
 
+# READ
 @router.get("/plannings")
-async def get_all_planning() -> list[Planning]:
-    if len(planning) == 0:
+async def read_plannings():
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM planning")
+        result = cursor.fetchall()
+        return result
+
+
+@router.get("/plannings/{planning_id}")
+async def read_planning(planning_id: int):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM planning WHERE id=%s", (planning_id,))
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="Planning not found")
+        return {"id": result["id"], "name": result["name"], "id_company": result["id_company"]}
+
+
+# CREATE
+@router.post("/plannings")
+async def create_planning(planning: Planning):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM planning WHERE name=%s",
+                       (planning.name,))
+        result = cursor.fetchone()
+        if result:
+            raise HTTPException(
+                status_code=409, detail="Planning already exists")
+        cursor.execute("INSERT INTO planning (name, id_company) VALUES (%s, %s)",
+                       (planning.name, planning.id_company,))
+        connection.commit()
+        return {"id": cursor.lastrowid, "name": planning.name, "id_company": planning.id_company}
+
+
+# UPDATE
+@router.put("/plannings/{planning_id}")
+async def update_planning(planning_id: int, planning: Planning):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM planning WHERE id=%s", (planning_id,))
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="Planning not found")
+        cursor.execute("UPDATE planning SET name=%s WHERE id=%s",
+                       (planning.name, planning_id))
+        connection.commit()
+        return {"id": planning_id, "name": planning.name, "id_company": planning.id_company}
+
+
+# DELETE
+@router.delete("/plannings/{planning_id}")
+async def delete_planning(planning_id: int):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM planning WHERE id=%s", (planning_id,))
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="Planning not found")
+        cursor.execute("DELETE FROM planning WHERE id=%s", (planning_id,))
+        connection.commit()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    return planning
-
-
-@router.get("/planning/{planning_id}")
-async def get_planning_by_id(planning_id: int) -> Planning:
-    for plan in planning:
-        if plan["id"] == planning_id:
-            return plan
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Planning not found")
-
-
-@router.post("/planning")
-async def create_planning(plan: Planning) -> Planning:
-    planning.append(plan)
-    return plan

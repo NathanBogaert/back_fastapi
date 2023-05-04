@@ -7,26 +7,28 @@ from pydantic import BaseModel
 # Local imports
 
 
-class User(BaseModel):
-    id: int
-    name: str
-    email: str
-    right: Enum
-
-
-class right(Enum):
-    MAINTAINER = 1
-    ADMIN = 2
-    USER = 3
-
-
 class Company(BaseModel):
     id: int
     name: str
-    users: list[User]
+
+
+class User(BaseModel):
+    id: int
+    id_company: int
+    name: str
+    email: str
+    rights: str
 
 
 class Planning(BaseModel):
     id: int
     name: str
-    company: Company
+    id_company: int
+
+
+class Activity(BaseModel):
+    id: int
+    name: str
+    startTime: str
+    endTime: str
+    id_planning: int
