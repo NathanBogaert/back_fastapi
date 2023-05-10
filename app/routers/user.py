@@ -1,8 +1,8 @@
 # System imports
+import pymysql
 
 # Libs imports
-import pymysql
-from fastapi import APIRouter, status, Response, HTTPException
+from fastapi import APIRouter, status, Response, HTTPException, Depends
 
 # Local imports
 from internal.models import User
@@ -33,22 +33,22 @@ async def read_user(user_id: int):
         result = cursor.fetchone()
         if not result:
             raise HTTPException(status_code=404, detail="User not found")
-        return {"id": result["id"], "name": result["name"], "email": result["email"], "rights": result["rights"], "id_company": result["id_company"]}
+        return {"id": result["id"], "name": result["name"], "password": result["password"], "email": result["email"], "rights": result["rights"], "id_company": result["id_company"]}
 
 
 # CREATE
 @router.post("/users")
 async def create_user(user: User):
     with connection.cursor() as cursor:
-        cursor.execute("SELECT * FROM user WHERE name=%s", (user.name,))
+        cursor.execute("SELECT * FROM user WHERE email=%s", (user.email,))
         result = cursor.fetchone()
         if result:
             raise HTTPException(
                 status_code=409, detail="User already exists")
-        cursor.execute("INSERT INTO user (name, email, rights, id_company) VALUES (%s, %s, %s, %s)",
-                       (user.name, user.email, user.rights, user.id_company))
+        cursor.execute("INSERT INTO user (name, password, email, rights, id_company) VALUES (%s, %s, %s, %s, %s)",
+                       (user.name, user.password, user.email, user.rights, user.id_company))
         connection.commit()
-        return {"id": cursor.lastrowid, "name": user.name, "email": user.email, "rights": user.rights, "id_company": user.id_company}
+        return {"id": cursor.lastrowid, "name": user.name, "password": user.password, "email": user.email, "rights": user.rights, "id_company": user.id_company}
 
 
 # UPDATE
@@ -59,10 +59,10 @@ async def update_user(user_id: int, user: User):
         result = cursor.fetchone()
         if not result:
             raise HTTPException(status_code=404, detail="User not found")
-        cursor.execute("UPDATE user SET name=%s, email=%s, rights=%s, id_company=%s WHERE id=%s",
-                       (user.name, user.email, user.rights, user.id_company, user_id))
+        cursor.execute("UPDATE user SET name=%s, password=%s, email=%s, rights=%s, id_company=%s WHERE id=%s",
+                       (user.name, user.password, user.email, user.rights, user.id_company, user_id))
         connection.commit()
-        return {"id": user_id, "name": user.name, "email": user.email, "rights": user.rights, "id_company": user.id_company}
+        return {"id": user_id, "name": user.name, "password": user.password, "email": user.email, "rights": user.rights, "id_company": user.id_company}
 
 
 # DELETE

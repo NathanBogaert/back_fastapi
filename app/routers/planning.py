@@ -1,7 +1,7 @@
 # System imports
+import pymysql
 
 # Libs imports
-import pymysql
 from fastapi import APIRouter, status, Response, HTTPException
 
 # Local imports

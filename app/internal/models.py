@@ -14,10 +14,11 @@ class Company(BaseModel):
 
 class User(BaseModel):
     id: int
-    id_company: int
     name: str
+    password: str
     email: str
     rights: str
+    id_company: int
 
 
 class Planning(BaseModel):
