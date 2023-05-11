@@ -45,7 +45,7 @@ async def decode_token(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     with connection.cursor() as cursor:
         cursor.execute(query="SELECT * FROM user WHERE email = %s AND password = %s",
-                       args=(form_data.username, form_data.password))
+                       args=(form_data.username, hashlib.sha256(form_data.password.encode()).hexdigest(),))
         result = cursor.fetchone()
         if result is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
