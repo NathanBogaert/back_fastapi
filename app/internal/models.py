@@ -1,5 +1,6 @@
 # System imports
 from enum import Enum
+from datetime import datetime
 
 # Libs imports
 from pydantic import BaseModel
@@ -14,7 +15,9 @@ class Company(BaseModel):
 
 class User(BaseModel):
     id: int
-    name: str
+    username: str
+    firstname: str
+    lastname: str
     password: str
     email: str
     rights: str
@@ -30,6 +33,7 @@ class Planning(BaseModel):
 class Activity(BaseModel):
     id: int
     name: str
-    startTime: str
-    endTime: str
+    startTime: datetime
+    endTime: datetime
+    created_by: int
     id_planning: int

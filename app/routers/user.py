@@ -1,13 +1,15 @@
 # System imports
+from typing import Annotated
 import pymysql
 import hashlib
 
 # Libs imports
-from fastapi import APIRouter, status, Response, HTTPException, Depends
+from fastapi import APIRouter, status, HTTPException, Depends
 from cryptography.fernet import Fernet
 
 # Local imports
 from internal.models import User
+from internal.auth import decode_token
 
 router = APIRouter()
 
@@ -23,68 +25,134 @@ f = Fernet(key)
 
 
 # READ
-@ router.get("/users")
-async def read_users():
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT * FROM user")
-        result = cursor.fetchall()
-        for user in result:
-            user["name"] = f.decrypt(user["name"].encode())
-            user["email"] = f.decrypt(user["email"].encode())
-        return result
+@router.get("/users")
+async def read_users(user: Annotated[str, Depends(decode_token)]):
+    if user.rights != "MAINTAINER" and user.rights != "ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this ressource.",
+        )
+    if user.rights == "ADMIN":
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT `id`, `username`, `firstname`, `lastname`, `email`, `rights`, `id_company` FROM user WHERE id_company=%s", (user.id_company,))
+            result = cursor.fetchall()
+            for user in result:
+                user["firstname"] = f.decrypt(user["firstname"].encode())
+                user["lastname"] = f.decrypt(user["lastname"].encode())
+                user["email"] = f.decrypt(user["email"].encode())
+            return result
+    if user.rights == "MAINTAINER":
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT `id`, `username`, `firstname`, `lastname`, `email`, `rights`, `id_company` FROM user")
+            result = cursor.fetchall()
+            for user in result:
+                user["firstname"] = f.decrypt(user["firstname"].encode())
+                user["lastname"] = f.decrypt(user["lastname"].encode())
+                user["email"] = f.decrypt(user["email"].encode())
+            return result
 
 
-@ router.get("/users/{user_id}")
-async def read_user(user_id: int):
+@router.get("/users/{user_id}")
+async def read_user(user_id: int, user: Annotated[str, Depends(decode_token)]):
+    if user.rights != "MAINTAINER" and user.rights != "ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this ressource.",
+        )
     with connection.cursor() as cursor:
-        cursor.execute("SELECT * FROM user WHERE id=%s", (user_id,))
+        cursor.execute(
+            "SELECT `id`, `username`, `firstname`, `lastname`, `email`, `rights`, `id_company` FROM user WHERE id=%s", (user_id,))
         result = cursor.fetchone()
         if not result:
             raise HTTPException(status_code=404, detail="User not found")
-        return {"id": result["id"], "name": f.decrypt(result["name"].encode()), "password": result["password"],
-                "email": f.decrypt(result["email"].encode()), "rights": result["rights"], "id_company": result["id_company"]}
+        if user.id_company != result["id_company"] and user.rights != "MAINTAINER":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this ressource.",
+            )
+        return {"id": result["id"], "username": result["username"], "firstname": f.decrypt(result["firstname"].encode()),
+                "lastname": f.decrypt(result["lastname"].encode()), "email": f.decrypt(result["email"].encode()),
+                "rights": result["rights"], "id_company": result["id_company"]}
 
 
 # CREATE
-@ router.post("/users")
-async def create_user(user: User):
+@router.post("/users")
+async def create_user(user_create: User,  user: Annotated[str, Depends(decode_token)]):
+    if user.rights != "MAINTAINER":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this ressource.",
+        )
     with connection.cursor() as cursor:
-        cursor.execute("SELECT * FROM user WHERE email=%s", (user.email,))
+        cursor.execute("SELECT * FROM user WHERE email=%s",
+                       (f.encrypt(user_create.email.encode()),))
         result = cursor.fetchone()
         if result:
             raise HTTPException(
                 status_code=409, detail="User already exists")
-        cursor.execute("INSERT INTO user (name, password, email, rights, id_company) VALUES (%s, %s, %s, %s, %s)",
-                       (f.encrypt(user.name.encode()), hashlib.sha256(user.password.encode()).hexdigest(),
-                        f.encrypt(user.email.encode()), user.rights, user.id_company))
+        cursor.execute("INSERT INTO user (username, firstname, lastname, password, email, rights, id_company) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                       (user_create.username, f.encrypt(user_create.firstname.encode()), f.encrypt(user_create.lastname.encode()),
+                        hashlib.sha256(user_create.password.encode()).hexdigest(
+                       ), f.encrypt(user_create.email.encode()),
+                           user_create.rights, user_create.id_company))
         connection.commit()
-        return {"id": cursor.lastrowid, "name": user.name, "password": user.password,
-                "email": user.email, "rights": user.rights, "id_company": user.id_company}
+        return {"id": user_create.id, "username": user_create.username, "firstname": user_create.firstname, "lastname": user_create.lastname,
+                "email": user_create.email, "rights": user_create.rights, "id_company": user_create.id_company}
 
 
 # UPDATE
-@ router.put("/users/{user_id}")
-async def update_user(user_id: int, user: User):
+@router.put("/users/{user_id}")
+async def update_user(user_id: int, user_update: User, user: Annotated[str, Depends(decode_token)]):
+    if user.rights != "MAINTAINER" and user.rights != "ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this ressource.",
+        )
     with connection.cursor() as cursor:
         cursor.execute("SELECT * FROM user WHERE id=%s", (user_id,))
         result = cursor.fetchone()
         if not result:
             raise HTTPException(status_code=404, detail="User not found")
-        cursor.execute("UPDATE user SET name=%s, password=%s, email=%s, rights=%s, id_company=%s WHERE id=%s",
-                       (f.encrypt(user.name.encode()), hashlib.sha256(user.password.encode()).hexdigest(),
-                        f.encrypt(user.email.encode()), user.rights, user.id_company, user_id))
+        if user.id_company != result["id_company"] and user.rights != "MAINTAINER":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this ressource.",
+            )
+        if user.rights != "MAINTAINER" and user.id_company != user_update.id_company:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not allowed to modify the company of this user.",
+            )
+        cursor.execute("UPDATE user SET username=%s, firstname=%s, lastname=%s, password=%s, email=%s, rights=%s, id_company=%s WHERE id=%s",
+                       (user_update.username, f.encrypt(user_update.firstname.encode()), f.encrypt(user_update.lastname.encode()),
+                        hashlib.sha256(
+                            user_update.password.encode()).hexdigest(),
+                        f.encrypt(user_update.email.encode()), user_update.rights, user_update.id_company, user_id))
         connection.commit()
-        return {"id": user_id, "name": user.name, "password": user.password, "email": user.email, "rights": user.rights, "id_company": user.id_company}
+        return {"id": user_id, "username": user_update.username, "firstname": user_update.firstname, "lastname": user_update.lastname,
+                "email": user_update.email, "rights": user_update.rights, "id_company": user_update.id_company}
 
 
 # DELETE
-@ router.delete("/users/{user_id}")
-async def delete_user(user_id: int):
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: int, user: Annotated[str, Depends(decode_token)]):
+    if user.rights != "MAINTAINER" and user.rights != "ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this ressource.",
+        )
     with connection.cursor() as cursor:
         cursor.execute("SELECT * FROM user WHERE id=%s", (user_id,))
         result = cursor.fetchone()
         if not result:
             raise HTTPException(status_code=404, detail="User not found")
+        if user.id_company != result["id_company"] and user.rights != "MAINTAINER":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this ressource.",
+            )
         cursor.execute("DELETE FROM user WHERE id=%s", (user_id,))
         connection.commit()
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        return {"message": "User deleted"}
