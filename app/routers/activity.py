@@ -4,9 +4,10 @@ import pymysql
 
 # Libs imports
 from fastapi import APIRouter, status, Depends, HTTPException
+from cryptography.fernet import Fernet
 
 # Local imports
-from internal.models import Activity
+from internal.models import Activity, Participant
 from internal.auth import decode_token
 
 router = APIRouter()
@@ -18,20 +19,30 @@ connection = pymysql.connect(host='host.docker.internal',
                              cursorclass=pymysql.cursors.DictCursor)
 cursor = connection.cursor(pymysql.cursors.DictCursor)
 
+key = "JWkLd3kOabKBPLSkqEWXLisyOzP5ejfL3JtML1a21nA="
+f = Fernet(key)
+
 
 # READ
 @router.get("/activities")
 async def read_activities(user: Annotated[str, Depends(decode_token)]):
     if user.rights == "MAINTAINER":
         with connection.cursor() as cursor:
-            cursor.execute("SELECT * FROM activity")
+            cursor.execute(
+                "SELECT *, (SELECT COUNT(id_user) FROM participant WHERE id_activity = activity.id) AS participant_count FROM activity")
             result = cursor.fetchall()
+            if not result:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
             return result
     else:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT activity.id, activity.name, activity.startTime, activity.endTime, activity.created_by, activity.id_planning FROM activity INNER JOIN planning ON activity.id_planning=planning.id WHERE planning.id_company=%s", (user.id_company,))
+                "SELECT activity.id, activity.name, activity.startTime, activity.endTime, activity.created_by, activity.id_planning, (SELECT COUNT(id_user) FROM participant WHERE id_activity = activity.id) AS participant_count FROM activity INNER JOIN planning ON activity.id_planning=planning.id WHERE planning.id_company=%s", (user.id_company,))
             result = cursor.fetchall()
+            if not result:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
             return result
 
 
@@ -47,6 +58,9 @@ async def read_activity(activity_id: int, user: Annotated[str, Depends(decode_to
             cursor.execute(
                 "SELECT * FROM activity INNER JOIN planning ON activity.id_planning=planning.id WHERE activity.id=%s", (activity_id,))
             id_company_result = cursor.fetchone()
+            if not id_company_result:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
             # Verify if user is in the same company as the activity
             if user.id_company != id_company_result["id_company"]:
                 raise HTTPException(
@@ -55,18 +69,17 @@ async def read_activity(activity_id: int, user: Annotated[str, Depends(decode_to
                 "created_by": result["created_by"], "id_planning": result["id_planning"]}
 
 
-# TODO: Add a route to get all activities from a planning
 @router.get("/activities/planning/{planning_id}")
 async def read_activities_from_planning(planning_id: int, user: Annotated[str, Depends(decode_token)]):
     with connection.cursor() as cursor:
         cursor.execute("SELECT * FROM planning WHERE id=%s", (planning_id,))
-        result = cursor.fetchone()
-        if not result:
+        id_planning_result = cursor.fetchone()
+        if not id_planning_result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Planning not found")
         if user.rights != "MAINTAINER":
             # Verify if user is in the same company as the planning
-            if user.id_company != result["id_company"]:
+            if user.id_company != id_planning_result["id_company"]:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this planning")
         cursor.execute(
@@ -75,6 +88,40 @@ async def read_activities_from_planning(planning_id: int, user: Annotated[str, D
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="No activities found for this planning")
+        return result
+
+
+@router.get("/activities/{activity_id}/participants")
+async def read_participants_from_activity(activity_id: int, user: Annotated[str, Depends(decode_token)]):
+    with connection.cursor() as cursor:
+        if user.rights != "MAINTAINER" and user.rights != "ADMIN":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this resource")
+        cursor.execute("SELECT * FROM activity WHERE id=%s", (activity_id,))
+        id_activity_result = cursor.fetchone()
+        if not id_activity_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+        if user.rights != "MAINTAINER":
+            cursor.execute(
+                "SELECT * FROM activity INNER JOIN planning ON activity.id_planning=planning.id WHERE activity.id=%s", (activity_id,))
+            id_company_result = cursor.fetchone()
+            if not id_company_result:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+            # Verify if user is in the same company as the activity
+            if user.id_company != id_company_result["id_company"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this activity")
+        cursor.execute(
+            "SELECT user.firstname, user.lastname FROM user INNER JOIN participant ON participant.id_user = user.id WHERE participant.id_activity=%s", (activity_id,))
+        result = cursor.fetchall()
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="No participants found for this activity")
+        for user in result:
+            user["firstname"] = f.decrypt(user["firstname"].encode())
+            user["lastname"] = f.decrypt(user["lastname"].encode())
         return result
 
 
@@ -97,6 +144,81 @@ async def create_activity(activity: Activity, user: Annotated[str, Depends(decod
         connection.commit()
         return {"id": activity.id, "name": activity.name, "startTime": activity.startTime, "endTime": activity.endTime,
                 "created_by": user.id, "id_planning": activity.id_planning}
+
+
+@router.post("/activities/{activity_id}/participants")
+async def registration_to_activity(activity_id: int, user: Annotated[str, Depends(decode_token)]):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT * FROM participant WHERE id_activity=%s AND id_user=%s", (activity_id, user.id,))
+        participant_result = cursor.fetchone()
+        if participant_result:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="You are already registered to this activity")
+        cursor.execute(
+            "SELECT * FROM activity WHERE id=%s", (activity_id,))
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+        cursor.execute(
+            "SELECT * FROM activity INNER JOIN planning ON activity.id_planning=planning.id WHERE activity.id=%s", (activity_id,))
+        id_company_result = cursor.fetchone()
+        if not id_company_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+        # Verify if user is in the same company as the activity
+        if user.id_company != id_company_result["id_company"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="You can't participate to an activity that is not in your company")
+        cursor.execute("INSERT INTO participant (id_activity, id_user) VALUES (%s, %s)",
+                       (activity_id, user.id,))
+        connection.commit()
+        return {"id_activity": activity_id, "id_user": user.id}
+
+
+@router.post("/activities/{activity_id}/participants/{user_id}")
+async def add_participant_to_activity(activity_id: int, user_id: int, user: Annotated[str, Depends(decode_token)]):
+    if user.rights != "MAINTAINER" and user.rights != "ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this ressource")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT * FROM participant WHERE id_activity=%s AND id_user=%s", (activity_id, user_id,))
+        participant_result = cursor.fetchone()
+        if participant_result:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="This user is already registered to this activity")
+        cursor.execute(
+            "SELECT * FROM activity WHERE id=%s", (activity_id,))
+        result = cursor.fetchone()
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+        cursor.execute(
+            "SELECT * FROM activity INNER JOIN planning ON activity.id_planning=planning.id WHERE activity.id=%s", (activity_id,))
+        id_company_result = cursor.fetchone()
+        if not id_company_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Planning not found")
+        cursor.execute("SELECT * FROM user WHERE id=%s", (user_id,))
+        id_user_result = cursor.fetchone()
+        if not id_user_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        # Verify if user to add is in the same company as the planning of the activity
+        if id_company_result["id_company"] != id_user_result["id_company"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="User is not in the same company as the activity")
+        if user.rights != "MAINTAINER":
+            # Verify if user is in the same company as the planning of the activity
+            if user.id_company != id_company_result["id_company"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="You can't add a participant to an activity that is not in your company")
+        cursor.execute("INSERT INTO participant (id_activity, id_user) VALUES (%s, %s)",
+                       (activity_id, user_id,))
+        connection.commit()
+        return {"id_activity": activity_id, "id_user": user_id}
 
 
 # UPDATE
@@ -148,6 +270,9 @@ async def delete_activity(activity_id: int, user: Annotated[str, Depends(decode_
             cursor.execute(
                 "SELECT * FROM planning WHERE id=%s", (result["id_planning"],))
             id_company_result = cursor.fetchone()
+            if not id_company_result:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Planning not found")
             # Verify if user is in the same company as the activity
             if user.id_company != id_company_result["id_company"]:
                 raise HTTPException(
@@ -155,3 +280,37 @@ async def delete_activity(activity_id: int, user: Annotated[str, Depends(decode_
         cursor.execute("DELETE FROM activity WHERE id=%s", (activity_id,))
         connection.commit()
         return {"message": "Activity deleted"}
+
+
+@router.delete("/activities/{activity_id}/participants/{user_id}")
+async def delete_participant_from_activity(activity_id: int, user_id: int, user: Annotated[str, Depends(decode_token)]):
+    if user.rights != "MAINTAINER" and user.rights != "ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this ressource.")
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM activity WHERE id=%s", (activity_id,))
+        activity_result = cursor.fetchone()
+        if not activity_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+        cursor.execute(
+            "SELECT * FROM participant WHERE id_activity=%s AND id_user=%s", (activity_id, user_id,))
+        participant_result = cursor.fetchone()
+        if not participant_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found")
+        if user.rights != "MAINTAINER":
+            cursor.execute(
+                "SELECT * FROM planning WHERE id=%s", (activity_result["id_planning"],))
+            id_company_result = cursor.fetchone()
+            if not id_company_result:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Planning not found")
+            # Verify if user is in the same company as the activity
+            if user.id_company != id_company_result["id_company"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="You can't delete a participant from an activity that is not in your company")
+        cursor.execute("DELETE FROM participant WHERE id_activity=%s AND id_user=%s",
+                       (activity_id, user_id,))
+        connection.commit()
+        return {"message": "Participant deleted from activity"}

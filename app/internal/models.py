@@ -36,3 +36,8 @@ class Activity(BaseModel):
     endTime: datetime
     created_by: int
     id_planning: int
+
+
+class Participant(BaseModel):
+    id_user: int
+    id_activity: int

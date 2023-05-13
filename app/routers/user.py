@@ -79,7 +79,6 @@ async def read_user(user_id: int, user: Annotated[str, Depends(decode_token)]):
                 "rights": result["rights"], "id_company": result["id_company"]}
 
 
-# TODO: Add a route to get all the users of a company
 @router.get("/users/company/{company_id}")
 async def read_company_users(company_id: int, user: Annotated[str, Depends(decode_token)]):
     if user.rights != "MAINTAINER":

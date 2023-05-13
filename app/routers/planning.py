@@ -50,7 +50,6 @@ async def read_planning(planning_id: int, user: Annotated[str, Depends(decode_to
         return {"id": result["id"], "name": result["name"], "id_company": result["id_company"]}
 
 
-# TODO: Add a route to get all plannings from a company
 @router.get("/companies/{company_id}/plannings")
 async def read_plannings_from_company(company_id: int, user: Annotated[str, Depends(decode_token)]):
     if user.rights != "MAINTAINER":
