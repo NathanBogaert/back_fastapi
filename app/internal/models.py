@@ -1,5 +1,4 @@
 # System imports
-from enum import Enum
 from datetime import datetime
 
 # Libs imports

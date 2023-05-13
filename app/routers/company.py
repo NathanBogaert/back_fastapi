@@ -34,7 +34,8 @@ async def read_company(company_id: int, user: Annotated[str, Depends(decode_toke
         cursor.execute("SELECT * FROM company WHERE id=%s", (company_id,))
         result = cursor.fetchone()
         if not result:
-            raise HTTPException(status_code=404, detail="Company not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
         return {"id": result["id"], "name": result["name"]}
 
 
@@ -51,7 +52,7 @@ async def create_company(company: Company, user: Annotated[str, Depends(decode_t
         result = cursor.fetchone()
         if result:
             raise HTTPException(
-                status_code=409, detail="Company already exists")
+                status_code=status.HTTP_409_CONFLICT, detail="Company already exists")
         cursor.execute("INSERT INTO company (name) VALUES (%s)",
                        (company.name,))
         connection.commit()
@@ -70,7 +71,8 @@ async def update_company(company_id: int, company: Company, user: Annotated[str,
         cursor.execute("SELECT * FROM company WHERE id=%s", (company_id,))
         result = cursor.fetchone()
         if not result:
-            raise HTTPException(status_code=404, detail="Company not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
         cursor.execute("UPDATE company SET name=%s WHERE id=%s",
                        (company.name, company_id))
         connection.commit()
@@ -89,7 +91,8 @@ async def delete_company(company_id: int, user: Annotated[str, Depends(decode_to
         cursor.execute("SELECT * FROM company WHERE id=%s", (company_id,))
         result = cursor.fetchone()
         if not result:
-            raise HTTPException(status_code=404, detail="Company not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
         cursor.execute("DELETE FROM company WHERE id=%s", (company_id,))
         connection.commit()
         return {"message": "Company deleted"}

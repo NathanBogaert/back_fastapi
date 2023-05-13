@@ -37,7 +37,7 @@ async def decode_token(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
     )
     try:
         decoded_data = jwt.decode(token, JWT_KEY, algorithms=['HS256'])
-        # verify that the user actually exists, for example if it was deleted since the JWT was emited
+        # Verify if the user exists
         with connection.cursor() as cursor:
             cursor.execute("SELECT * FROM user WHERE id=%s",
                            (decoded_data["id"],))
