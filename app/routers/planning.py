@@ -24,13 +24,14 @@ cursor = connection.cursor(pymysql.cursors.DictCursor)
 async def read_plannings(user: Annotated[str, Depends(decode_token)]):
     if user.rights == "MAINTAINER":
         with connection.cursor() as cursor:
-            cursor.execute("SELECT * FROM planning")
+            cursor.execute(
+                "SELECT planning.id, planning.name, company.name FROM planning INNER JOIN company ON planning.id_company=company.id")
             result = cursor.fetchall()
             return result
     else:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT * FROM planning WHERE id_company=%s", (user.id_company,))
+                "SELECT planning.id, planning.name, company.name FROM planning INNER JOIN company ON planning.id_company=company.id WHERE id_company=%s", (user.id_company,))
             result = cursor.fetchall()
             return result
 
@@ -38,7 +39,8 @@ async def read_plannings(user: Annotated[str, Depends(decode_token)]):
 @router.get("/plannings/{planning_id}")
 async def read_planning(planning_id: int, user: Annotated[str, Depends(decode_token)]):
     with connection.cursor() as cursor:
-        cursor.execute("SELECT * FROM planning WHERE id=%s", (planning_id,))
+        cursor.execute(
+            "SELECT planning.id, planning.name, planning.id_company, company.name AS company_name FROM planning INNER JOIN company ON planning.id_company=company.id WHERE planning.id=%s", (planning_id,))
         result = cursor.fetchone()
         if not result:
             raise HTTPException(
@@ -47,7 +49,7 @@ async def read_planning(planning_id: int, user: Annotated[str, Depends(decode_to
         if user.rights != "MAINTAINER" and user.id_company != result["id_company"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this planning")
-        return {"id": result["id"], "name": result["name"], "id_company": result["id_company"]}
+        return {"id": result["id"], "name": result["name"], "company_name": result["company_name"]}
 
 
 @router.get("/companies/{company_id}/plannings")
@@ -62,7 +64,7 @@ async def read_plannings_from_company(company_id: int, user: Annotated[str, Depe
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
         cursor.execute(
-            "SELECT * FROM planning WHERE id_company=%s", (company_id,))
+            "SELECT planning.id, planning.name, company.name AS company_name FROM planning INNER JOIN company ON planning.id_company=company.id WHERE planning.id_company=%s", (company_id,))
         result = cursor.fetchall()
         if not result:
             raise HTTPException(
@@ -73,7 +75,14 @@ async def read_plannings_from_company(company_id: int, user: Annotated[str, Depe
 # CREATE
 @router.post("/plannings")
 async def create_planning(planning: Planning, user: Annotated[str, Depends(decode_token)]):
+    if user.rights != "MAINTAINER" and user.rights != "ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this ressource.")
     with connection.cursor() as cursor:
+        # Verify if fields are not empty
+        if planning.name == "" or planning.id_company == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Missing parameters")
         # Verify if user is in the same company as the planning he wants to create
         if user.rights != "MAINTAINER" and user.id_company != planning.id_company:
             raise HTTPException(
@@ -96,6 +105,11 @@ async def update_planning(planning_id: int, planning: Planning, user: Annotated[
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Planning not found")
+        # Verify if fields are not empty
+        if planning.name == "":
+            planning.name = result["name"]
+        if planning.id_company == 0:
+            planning.id_company = result["id_company"]
         # Verify if user is in the same company as the planning he wants to update
         if user.rights != "MAINTAINER" and user.id_company != result["id_company"]:
             raise HTTPException(

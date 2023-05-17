@@ -35,7 +35,7 @@ async def read_users(user: Annotated[str, Depends(decode_token)]):
     if user.rights == "ADMIN":
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT `id`, `username`, `firstname`, `lastname`, `email`, `rights`, `id_company` FROM user WHERE id_company=%s", (user.id_company,))
+                "SELECT user.`id`, user.`username`, user.`firstname`, user.`lastname`, user.`email`, user.`rights`, company.`name` FROM user INNER JOIN company ON user.id_company = company.id WHERE user.id_company=%s", (user.id_company,))
             result = cursor.fetchall()
             for user in result:
                 user["firstname"] = f.decrypt(user["firstname"].encode())
@@ -45,7 +45,7 @@ async def read_users(user: Annotated[str, Depends(decode_token)]):
     if user.rights == "MAINTAINER":
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT `id`, `username`, `firstname`, `lastname`, `email`, `rights`, `id_company` FROM user")
+                "SELECT user.`id`, user.`username`, user.`firstname`, user.`lastname`, user.`email`, user.`rights`, company.`name` FROM user INNER JOIN company ON user.id_company = company.id")
             result = cursor.fetchall()
             for user in result:
                 user["firstname"] = f.decrypt(user["firstname"].encode())
@@ -63,7 +63,7 @@ async def read_user(user_id: int, user: Annotated[str, Depends(decode_token)]):
         )
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT `id`, `username`, `firstname`, `lastname`, `email`, `rights`, `id_company` FROM user WHERE id=%s", (user_id,))
+            "SELECT user.`id`, user.`username`, user.`firstname`, user.`lastname`, user.`email`, user.`rights`, user.`id_company`, company.`name` AS company_name FROM user INNER JOIN company ON user.id_company = company.id WHERE user.id=%s", (user_id,))
         result = cursor.fetchone()
         if not result:
             raise HTTPException(
@@ -76,7 +76,7 @@ async def read_user(user_id: int, user: Annotated[str, Depends(decode_token)]):
             )
         return {"id": result["id"], "username": result["username"], "firstname": f.decrypt(result["firstname"].encode()),
                 "lastname": f.decrypt(result["lastname"].encode()), "email": f.decrypt(result["email"].encode()),
-                "rights": result["rights"], "id_company": result["id_company"]}
+                "rights": result["rights"], "company name": result["company_name"]}
 
 
 @router.get("/users/company/{company_id}")
@@ -87,12 +87,17 @@ async def read_company_users(company_id: int, user: Annotated[str, Depends(decod
             detail="You don't have access to this ressource.",
         )
     with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM company WHERE id=%s", (company_id,))
+        company = cursor.fetchone()
+        if not company:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
         cursor.execute(
-            "SELECT `id`, `username`, `firstname`, `lastname`, `email`, `rights`, `id_company` FROM user WHERE id_company=%s", (company_id,))
+            "SELECT user.`id`, user.`username`, user.`firstname`, user.`lastname`, user.`email`, user.`rights`, company.`name` FROM user INNER JOIN company ON user.id_company = company.id WHERE user.id_company=%s", (company_id,))
         result = cursor.fetchall()
         if not result:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+                status_code=status.HTTP_404_NOT_FOUND, detail="No user found for this company")
         for user in result:
             user["firstname"] = f.decrypt(user["firstname"].encode())
             user["lastname"] = f.decrypt(user["lastname"].encode())
@@ -109,6 +114,10 @@ async def create_user(user_create: User,  user: Annotated[str, Depends(decode_to
             detail="You don't have access to this ressource.",
         )
     with connection.cursor() as cursor:
+        # Verify if all fields are filled
+        if user_create.username == "" or user_create.firstname == "" or user_create.lastname == "" or user_create.password == "" or user_create.email == "" or user_create.rights == "" or user_create.id_company == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Missing fields")
         cursor.execute("SELECT * FROM user WHERE username=%s",
                        (user_create.username,))
         result = cursor.fetchone()
@@ -139,6 +148,25 @@ async def update_user(user_id: int, user_update: User, user: Annotated[str, Depe
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        # Verify if all fields are filled
+        if user_update.username == "":
+            user_update.username = result["username"]
+        if user_update.firstname == "":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Missing firstname")
+        if user_update.lastname == "":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Missing lastname")
+        if user_update.password == "":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Missing password")
+        if user_update.email == "":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Missing email")
+        if user_update.rights == "":
+            user_update.rights = result["rights"]
+        if user_update.id_company == 0:
+            user_update.id_company = result["id_company"]
         # Verify if user is in the same company as the user he wants to modify
         if user.id_company != result["id_company"] and user.rights != "MAINTAINER":
             raise HTTPException(
@@ -163,6 +191,10 @@ async def update_user(user_id: int, user_update: User, user: Annotated[str, Depe
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can't modify rights to maintainer.",
             )
+        if result["id"] != user_id:
+            if user_update.username == result["username"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="This username is already taken")
         cursor.execute("UPDATE user SET username=%s, firstname=%s, lastname=%s, password=%s, email=%s, rights=%s, id_company=%s WHERE id=%s",
                        (user_update.username, f.encrypt(user_update.firstname.encode()), f.encrypt(user_update.lastname.encode()),
                         hashlib.sha256(user_update.password.encode()).hexdigest(

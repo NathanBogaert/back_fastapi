@@ -57,7 +57,8 @@ async def decode_token(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     with connection.cursor() as cursor:
         cursor.execute("SELECT * FROM user WHERE username = %s AND password = %s",
-                       (form_data.username, hashlib.sha256(form_data.password.encode()).hexdigest()))
+                       (form_data.username, hashlib.sha256(
+                           form_data.password.encode()).hexdigest()))
         result = cursor.fetchone()
         if result is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
@@ -68,8 +69,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         return {"access_token": jwt_token, "token_type": "bearer"}
 
 
-@router.get("/current_user")
+@ router.get("/current_user")
 async def current_user(user: Annotated[User, Depends(decode_token)]):
+    cursor.execute("SELECT name FROM company WHERE id = %s",
+                   (user.id_company,))
+    result = cursor.fetchone()
     return {"id": user.id, "username": user.username, "firstname": f.decrypt(user.firstname.encode()),
             "lastname": f.decrypt(user.lastname.encode()), "email": f.decrypt(user.email.encode()),
-            "rights": user.rights, "id_company": user.id_company}
+            "rights": user.rights, "company": result["name"]}

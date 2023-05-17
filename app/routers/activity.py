@@ -1,6 +1,7 @@
 # System imports
 from typing import Annotated
 import pymysql
+from datetime import datetime
 
 # Libs imports
 from fastapi import APIRouter, status, Depends, HTTPException
@@ -29,27 +30,37 @@ async def read_activities(user: Annotated[str, Depends(decode_token)]):
     if user.rights == "MAINTAINER":
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT *, (SELECT COUNT(id_user) FROM participant WHERE id_activity = activity.id) AS participant_count FROM activity")
+                "SELECT activity.id, activity.name, activity.startTime, activity.endTime, user.firstname AS created_by_user_firstname, user.lastname AS created_by_user_lastname, planning.name, (SELECT COUNT(id_user) FROM participant WHERE id_activity = activity.id) AS participant_count FROM activity INNER JOIN planning ON activity.id_planning=planning.id INNER JOIN user ON activity.created_by=user.id")
             result = cursor.fetchall()
             if not result:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+            for i in result:
+                i["created_by_user_firstname"] = f.decrypt(
+                    i["created_by_user_firstname"].encode())
+                i["created_by_user_lastname"] = f.decrypt(
+                    i["created_by_user_lastname"].encode())
             return result
     else:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT activity.id, activity.name, activity.startTime, activity.endTime, activity.created_by, activity.id_planning, (SELECT COUNT(id_user) FROM participant WHERE id_activity = activity.id) AS participant_count FROM activity INNER JOIN planning ON activity.id_planning=planning.id WHERE planning.id_company=%s", (user.id_company,))
+                "SELECT activity.id, activity.name, activity.startTime, activity.endTime, user.firstname AS created_by_user_firstname, user.lastname AS created_by_user_lastname, planning.name, (SELECT COUNT(id_user) FROM participant WHERE id_activity = activity.id) AS participant_count FROM activity INNER JOIN planning ON activity.id_planning=planning.id INNER JOIN user ON activity.created_by=user.id WHERE planning.id_company=%s", (user.id_company,))
             result = cursor.fetchall()
             if not result:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+            for i in result:
+                i["created_by_user_firstname"] = f.decrypt(
+                    i["created_by_user_firstname"].encode())
+                i["created_by_user_lastname"] = f.decrypt(
+                    i["created_by_user_lastname"].encode())
             return result
 
 
 @router.get("/activities/{activity_id}")
 async def read_activity(activity_id: int, user: Annotated[str, Depends(decode_token)]):
     with connection.cursor() as cursor:
-        cursor.execute("SELECT * FROM activity WHERE id=%s", (activity_id,))
+        cursor.execute("SELECT activity.id, activity.name, activity.startTime, activity.endTime, user.firstname AS created_by_user_firstname, user.lastname AS created_by_user_lastname, planning.name AS planning_name, (SELECT COUNT(id_user) FROM participant WHERE id_activity = activity.id) AS participant_count FROM activity INNER JOIN planning ON activity.id_planning=planning.id INNER JOIN user ON activity.created_by=user.id WHERE activity.id=%s", (activity_id,))
         result = cursor.fetchone()
         if not result:
             raise HTTPException(
@@ -65,8 +76,11 @@ async def read_activity(activity_id: int, user: Annotated[str, Depends(decode_to
             if user.id_company != id_company_result["id_company"]:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this activity")
-        return {"id": result["id"], "name": result["name"], "startTime": result["startTime"], "endTime": result["endTime"],
-                "created_by": result["created_by"], "id_planning": result["id_planning"]}
+        result["created_by_user_firstname"] = f.decrypt(
+            result["created_by_user_firstname"].encode())
+        result["created_by_user_lastname"] = f.decrypt(
+            result["created_by_user_lastname"].encode())
+        return result
 
 
 @router.get("/activities/planning/{planning_id}")
@@ -83,11 +97,16 @@ async def read_activities_from_planning(planning_id: int, user: Annotated[str, D
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this planning")
         cursor.execute(
-            "SELECT * FROM activity WHERE id_planning=%s", (planning_id,))
+            "SELECT activity.id, activity.name, activity.startTime, activity.endTime, user.firstname AS created_by_user_firstname, user.lastname AS created_by_user_lastname, planning.name AS planning_name, (SELECT COUNT(id_user) FROM participant WHERE id_activity = activity.id) AS participant_count FROM activity INNER JOIN planning ON activity.id_planning=planning.id INNER JOIN user ON activity.created_by=user.id WHERE id_planning=%s", (planning_id,))
         result = cursor.fetchall()
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="No activities found for this planning")
+        for i in result:
+            i["created_by_user_firstname"] = f.decrypt(
+                i["created_by_user_firstname"].encode())
+            i["created_by_user_lastname"] = f.decrypt(
+                i["created_by_user_lastname"].encode())
         return result
 
 
@@ -129,6 +148,10 @@ async def read_participants_from_activity(activity_id: int, user: Annotated[str,
 @router.post("/activities")
 async def create_activity(activity: Activity, user: Annotated[str, Depends(decode_token)]):
     with connection.cursor() as cursor:
+        # Verify if fields are not empty
+        if activity.name == "" or activity.id_planning == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Missing parameters")
         cursor.execute("SELECT * FROM planning WHERE id=%s",
                        (activity.id_planning,))
         id_company_result = cursor.fetchone()
@@ -230,6 +253,15 @@ async def update_activity(activity_id: int, activity: Activity, user: Annotated[
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+        # Verify if fields are empty
+        if activity.name == "":
+            activity.name = result["name"]
+        if activity.startTime == "":
+            activity.startTime = result["startTime"]
+        if activity.endTime == "":
+            activity.endTime = result["endTime"]
+        if activity.id_planning == 0:
+            activity.id_planning = result["id_planning"]
         if user.rights == "USER" or user.rights == "ADMIN":
             if user.rights == "USER":
                 # Verify if user is the creator of the activity

@@ -48,6 +48,10 @@ async def create_company(company: Company, user: Annotated[str, Depends(decode_t
             detail="You don't have access to this ressource.",
         )
     with connection.cursor() as cursor:
+        # Verify if company is filled
+        if company.name == "":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Missing name")
         cursor.execute("SELECT * FROM company WHERE name=%s", (company.name,))
         result = cursor.fetchone()
         if result:
@@ -73,6 +77,9 @@ async def update_company(company_id: int, company: Company, user: Annotated[str,
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        # Verify if company is filled
+        if company.name == "":
+            company.name = result["name"]
         cursor.execute("UPDATE company SET name=%s WHERE id=%s",
                        (company.name, company_id))
         connection.commit()
@@ -93,6 +100,11 @@ async def delete_company(company_id: int, user: Annotated[str, Depends(decode_to
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        cursor.execute("SELECT * FROM user WHERE id_company=%s", (company_id,))
+        user_result = cursor.fetchone()
+        if user_result:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Company is not empty")
         cursor.execute("DELETE FROM company WHERE id=%s", (company_id,))
         connection.commit()
         return {"message": "Company deleted"}
