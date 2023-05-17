@@ -1,3 +1,5 @@
+BOGAERT Nathan -- back-python
+
 **Lancement du projet**
 
 1. Cloner le projet
@@ -7,7 +9,9 @@
 5. Accédez à [localhost:8080/docs](http://localhost:8080/docs#/) pour utiliser les différentes endpoints
 
 **Liste des utilisateurs**
+
 | username | password | company | rights |
+| ------ | | ------ | ------ | ------ |
 | boss | pwd | Ubibug | MAINTAINER |
 | admin | admin | Ubibug | ADMIN |
 | petchebest | kitchenmaster | Ubibug | USER |
